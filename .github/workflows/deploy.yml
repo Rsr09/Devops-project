@@ -1,0 +1,51 @@
+name: Full CI/CD: Build, Push, Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: ⬇️ Checkout Code
+      uses: actions/checkout@v3
+
+    - name: 🏷️ Generate image name & tag from commit message
+      id: image
+      run: |
+        IMAGE_NAME=rajveerapp
+        COMMIT_TAG=$(echo "${{ github.event.head_commit.message }}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-40)
+        echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+        echo "IMAGE_TAG=$COMMIT_TAG" >> $GITHUB_ENV
+        echo "🟢 Using image: $IMAGE_NAME:$COMMIT_TAG"
+
+    - name: 🔐 Log in to Azure
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: 🔐 Log in to ACR
+      uses: azure/docker-login@v1
+      with:
+        login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+        username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+        password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
+
+    - name: 🛠️ Build Docker image
+      run: |
+        docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} .
+
+    - name: 📦 Push Docker image to ACR
+      run: |
+        docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+    - name: 🚀 Deploy to Azure Container App
+      run: |
+        az containerapp update \
+          --name rajveer \
+          --resource-group rajveer \
+          --image ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
