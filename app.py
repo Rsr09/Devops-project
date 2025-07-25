@@ -38,10 +38,10 @@ def home():
         </style>
     </head>
     <body>
-        <h1>🚀 Hello from Rajveer & Vikas and Amit sir Flask App!</h1>
+        <h1>🚀 Hello from Rajveer & Vikas and Amit Sir Flask App!</h1>
         <h2>Deployed via GitHub Actions CI/CD to Azure</h2>
         <div class="version">
-            ✅ Deployment Version: <strong>v1.0.2</strong>
+            ✅ Deployment Version: <strong>v1.0.3</strong>
         </div>
     </body>
     </html>
