@@ -1,4 +1,4 @@
-name: CI/CD:Build, Push, Deploy Azure Container App
+name: CI/CD:Build → Test → Dockerize → Push → Deploy
 
 on:
   push:
@@ -12,56 +12,79 @@ env:
   ACR_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
-  build-push-deploy:
+  ci-cd-pipeline:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. Checkout code
     - name: ⬇️ Checkout Code
       uses: actions/checkout@v3
 
-    - name: 🏷️ Generate image tag from commit message
+    # 2. Build stage (e.g. install Python deps)
+    - name: 🏗️ Build Code
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 📦 Install Dependencies
       run: |
-        IMAGE_TAG=$(echo "${{ github.event.head_commit.message }}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-40)
+        pip install -r requirements.txt
+        pip install pytest
+
+    # 3. Run tests
+    - name: ✅ Run Unit Tests
+      run: pytest
+
+    # 4. Generate image tag
+    - name: 🏷️ Generate Docker Image Tag
+      run: |
+        IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
         echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
         echo "FULL_IMAGE=${{ env.ACR_SERVER }}/${{ env.IMAGE_NAME }}:$IMAGE_TAG" >> $GITHUB_ENV
 
-    - name: 🔐 Log in to Azure
+    # 5. Login to Azure
+    - name: 🔐 Login to Azure
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-    - name: 🔐 Log in to ACR
+    # 6. Login to ACR
+    - name: 🔐 Docker Login to ACR
       uses: azure/docker-login@v1
       with:
         login-server: ${{ secrets.ACR_LOGIN_SERVER }}
         username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
         password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
-    - name: 🛠️ Build Docker image
+    # 7. Build Docker image
+    - name: 🐳 Build Docker Image
       run: |
         docker build -t ${{ env.FULL_IMAGE }} .
 
-    - name: 📦 Push image to ACR
+    # 8. Push image to ACR
+    - name: 📤 Push Image to ACR
       run: |
         docker push ${{ env.FULL_IMAGE }}
 
-    - name: 📦 Check if Container App exists
+    # 9. Check if Container App exists
+    - name: 🔎 Check Container App Exists
       id: checkapp
       run: |
-        az containerapp show --name ${{ env.CONTAINERAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} \
-        && echo "exists=true" >> $GITHUB_ENV \
-        || echo "exists=false" >> $GITHUB_ENV
+        if az containerapp show --name ${{ env.CONTAINERAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }}; then
+          echo "exists=true" >> $GITHUB_ENV
+        else
+          echo "exists=false" >> $GITHUB_ENV
+        fi
 
-    - name: 🌱 Create Container App if not exists
+    # 10. Create Container App (if first time)
+    - name: 🆕 Create Container App
       if: env.exists == 'false'
       run: |
-        # Create an Azure Container App Environment if needed (one-time setup)
         az containerapp env create \
           --name rajveer-env \
           --resource-group ${{ env.RESOURCE_GROUP }} \
           --location centralindia
 
-        # Create the Container App
         az containerapp create \
           --name ${{ env.CONTAINERAPP_NAME }} \
           --resource-group ${{ env.RESOURCE_GROUP }} \
@@ -72,9 +95,9 @@ jobs:
           --registry-server ${{ env.ACR_SERVER }} \
           --registry-username ${{ secrets.ACR_USERNAME }} \
           --registry-password ${{ secrets.ACR_PASSWORD }}
-        
 
-    - name: 🚀 Update Container App if exists
+    # 11. Update app with new image
+    - name: 🚀 Deploy Updated Image
       if: env.exists == 'true'
       run: |
         az containerapp update \
@@ -82,11 +105,12 @@ jobs:
           --resource-group ${{ env.RESOURCE_GROUP }} \
           --image ${{ env.FULL_IMAGE }}
 
-    - name: 🌐 Show deployed URL
+    # 12. Show app URL
+    - name: 🌐 Show Deployed URL
       run: |
         URL=$(az containerapp show \
           --name ${{ env.CONTAINERAPP_NAME }} \
           --resource-group ${{ env.RESOURCE_GROUP }} \
           --query properties.configuration.ingress.fqdn \
           -o tsv)
-        echo "🌐 Visit your app: https://$URL"
+        echo "🌍 App running at: https://$URL"
