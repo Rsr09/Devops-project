@@ -12,8 +12,10 @@ env:
   ACR_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
 
 jobs:
-  build-test-docker-push-deploy:
+  build-test:
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.set_tag.outputs.image_tag }}
     steps:
       - name: 🧱 Checkout Code
         uses: actions/checkout@v3
@@ -22,6 +24,7 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - run: |
           pip install -r requirements.txt
           pip install pytest
@@ -30,11 +33,24 @@ jobs:
         run: |
           pytest tests || echo "⚠️ No tests found, skipping test failures."
 
-      - name: 🐳 Generate Docker Image Tag
+      - name: 🏷️ Generate Docker Image Tag
+        id: set_tag
         run: |
           IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           echo "FULL_IMAGE=${{ env.ACR_SERVER }}/${{ env.IMAGE_NAME }}:$IMAGE_TAG" >> $GITHUB_ENV
+          echo "::set-output name=image_tag::$IMAGE_TAG"
+
+  docker-build:
+    needs: build-test
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ needs.build-test.outputs.image_tag }}
+      ACR_SERVER: ${{ env.ACR_SERVER }}
+      IMAGE_NAME: ${{ env.IMAGE_NAME }}
+    steps:
+      - name: 🧱 Checkout Code
+        uses: actions/checkout@v3
 
       - name: 🔐 Login to Azure
         uses: azure/login@v1
@@ -49,52 +65,55 @@ jobs:
           password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
       - name: 🐳 Build Docker Image
-        run: docker build -t ${{ env.FULL_IMAGE }} .
+        run: |
+          docker build -t $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG .
+
+  push-acr:
+    needs: docker-build
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ needs.build-test.outputs.image_tag }}
+      ACR_SERVER: ${{ env.ACR_SERVER }}
+      IMAGE_NAME: ${{ env.IMAGE_NAME }}
+    steps:
+      - name: 🔐 Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: 🔐 Docker Login to ACR
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
+          password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
       - name: 📦 Push Docker Image to ACR
-        run: docker push ${{ env.FULL_IMAGE }}
+        run: |
+          docker push $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG
 
-      - name: 🔎 Check Container App Exists
+  deploy:
+    needs: push-acr
+    runs-on: ubuntu-latest
+    env:
+      RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}
+      CONTAINERAPP_NAME: ${{ env.CONTAINERAPP_NAME }}
+      ACR_SERVER: ${{ env.ACR_SERVER }}
+      IMAGE_NAME: ${{ env.IMAGE_NAME }}
+      IMAGE_TAG: ${{ needs.build-test.outputs.image_tag }}
+    steps:
+      - name: 🔐 Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: 🔎 Check if Container App Exists
         id: checkapp
         run: |
-          if az containerapp show --name ${{ env.CONTAINERAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} > /dev/null 2>&1; then
+          if az containerapp show --name $CONTAINERAPP_NAME --resource-group $RESOURCE_GROUP > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_ENV
           else
             echo "exists=false" >> $GITHUB_ENV
           fi
 
-      - name: 🆕 Create Container App if not exists
-        if: env.exists == 'false'
-        run: |
-          az containerapp env create \
-            --name rajveer-env \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --location centralindia
-
-          az containerapp create \
-            --name ${{ env.CONTAINERAPP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --environment rajveer-env \
-            --image ${{ env.FULL_IMAGE }} \
-            --target-port 80 \
-            --ingress external \
-            --registry-server ${{ env.ACR_SERVER }} \
-            --registry-username ${{ secrets.ACR_USERNAME }} \
-            --registry-password ${{ secrets.ACR_PASSWORD }}
-
-      - name: 🚀 Deploy New Version if app exists
-        if: env.exists == 'true'
-        run: |
-          az containerapp update \
-            --name ${{ env.CONTAINERAPP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.FULL_IMAGE }}
-
-      - name: 🌐 Show Deployed App URL
-        run: |
-          URL=$(az containerapp show \
-            --name ${{ env.CONTAINERAPP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --query properties.configuration.ingress.fqdn \
-            -o tsv)
-          echo "🌍 App deployed at: https://$URL"
+      - name: 🆕 Create Container App if not
