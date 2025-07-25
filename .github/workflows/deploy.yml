@@ -1,4 +1,4 @@
-name: CI/CD:Build → Test → Dockerize → Push → Deploy
+name: CI/CD: Build → Test → Dockerize → Push → Deploy
 
 on:
   push:
@@ -25,7 +25,8 @@ jobs:
         with:
           python-version: '3.10'
 
-      - run: |
+      - name: 📦 Install dependencies
+        run: |
           pip install -r requirements.txt
           pip install pytest
 
@@ -116,4 +117,38 @@ jobs:
             echo "exists=false" >> $GITHUB_ENV
           fi
 
-      - name: 🆕 Create Container App if not
+      - name: 🆕 Create Container App if not exists
+        if: env.exists == 'false'
+        run: |
+          az containerapp env create \
+            --name rajveer-env \
+            --resource-group $RESOURCE_GROUP \
+            --location centralindia
+
+          az containerapp create \
+            --name $CONTAINERAPP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --environment rajveer-env \
+            --image $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG \
+            --target-port 80 \
+            --ingress external \
+            --registry-server $ACR_SERVER \
+            --registry-username ${{ secrets.ACR_USERNAME }} \
+            --registry-password ${{ secrets.ACR_PASSWORD }}
+
+      - name: 🚀 Update Container App if exists
+        if: env.exists == 'true'
+        run: |
+          az containerapp update \
+            --name $CONTAINERAPP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --image $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG
+
+      - name: 🌐 Show Deployed URL
+        run: |
+          URL=$(az containerapp show \
+            --name $CONTAINERAPP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --query properties.configuration.ingress.fqdn \
+            -o tsv)
+          echo "🌍 App deployed at: https://$URL"
