@@ -69,7 +69,10 @@ jobs:
           --image ${{ env.FULL_IMAGE }} \
           --target-port 80 \
           --ingress external \
-          --registry-server ${{ env.ACR_SERVER }}
+          --registry-server ${{ env.ACR_SERVER }} \
+          --registry-username ${{ secrets.ACR_USERNAME }} \
+          --registry-password ${{ secrets.ACR_PASSWORD }}
+        
 
     - name: 🚀 Update Container App if exists
       if: env.exists == 'true'
