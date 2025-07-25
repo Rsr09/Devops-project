@@ -16,12 +16,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout code
-      - name: Checkout Code
+      # 🧱 Build Step
+      - name: ⬇️ Checkout Code
         uses: actions/checkout@v3
 
-      # 2. Setup Python & Install dependencies
-      - name: 🏗️ Setup Python
+      - name: 🏗️ Setup Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -31,25 +30,24 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      # 3. Run tests (if none, skip gracefully)
+      # ✅ Test Step
       - name: ✅ Run Unit Tests
         run: |
           pytest tests || echo "⚠️ No tests found, skipping test failures."
 
-      # 4. Generate docker image tag
+      # 🐳 Generate Image Tag
       - name: 🏷️ Generate Docker Image Tag
         run: |
           IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           echo "FULL_IMAGE=${{ env.ACR_SERVER }}/${{ env.IMAGE_NAME }}:$IMAGE_TAG" >> $GITHUB_ENV
 
-      # 5. Login to Azure
+      # 🔐 Azure & ACR Login
       - name: 🔐 Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 6. Docker login to ACR
       - name: 🔐 Docker Login to ACR
         uses: azure/docker-login@v1
         with:
@@ -57,17 +55,17 @@ jobs:
           username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
           password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
-      # 7. Build docker image
+      # 📦 Build Docker Image
       - name: 🐳 Build Docker Image
         run: |
           docker build -t ${{ env.FULL_IMAGE }} .
 
-      # 8. Push docker image
+      # 📤 Push Docker Image
       - name: 📤 Push Image to ACR
         run: |
           docker push ${{ env.FULL_IMAGE }}
 
-      # 9. Check if app exists
+      # 🔎 Check Container App existence
       - name: 🔎 Check if Container App Exists
         id: checkapp
         run: |
@@ -77,7 +75,7 @@ jobs:
             echo "exists=false" >> $GITHUB_ENV
           fi
 
-      # 10. Create container app if it doesn't exist
+      # 🆕 Create Container App if not exists
       - name: 🆕 Create Azure Container App
         if: env.exists == 'false'
         run: |
@@ -97,7 +95,7 @@ jobs:
             --registry-username ${{ secrets.ACR_USERNAME }} \
             --registry-password ${{ secrets.ACR_PASSWORD }}
 
-      # 11. Update if app exists
+      # 🚀 Deploy new version if app exists
       - name: 🚀 Deploy New Version
         if: env.exists == 'true'
         run: |
@@ -106,7 +104,7 @@ jobs:
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --image ${{ env.FULL_IMAGE }}
 
-      # 12. Show app URL
+      # 🌐 Show deployed URL
       - name: 🌐 Show Deployed App URL
         run: |
           URL=$(az containerapp show \
