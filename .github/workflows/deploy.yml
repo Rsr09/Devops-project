@@ -1,4 +1,4 @@
-name: CI/CD: Build → Test → Dockerize → Push → Deploy
+name: CI/CD:Build → Test → Dockerize → Push → Deploy
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - name: 🧱 Checkout Code
         uses: actions/checkout@v3
 
-      - name: 🧱 Setup Python 3.10 & Install Dependencies
+      - name: 🏗️ Setup Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -30,9 +30,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: 🧱 Run Unit Tests
+      - name: ✅ Run Unit Tests
         run: |
-          pytest tests || echo "⚠️ No tests found, skipping test failures."
+          pytest tests || echo "⚠️ No tests found, skipping failures."
 
       - name: 🏷️ Generate Docker Image Tag
         id: set_tag
@@ -50,7 +50,7 @@ jobs:
       ACR_SERVER: ${{ env.ACR_SERVER }}
       IMAGE_NAME: ${{ env.IMAGE_NAME }}
     steps:
-      - name: 🧱 Checkout Code
+      - name: 🐳 Checkout Code
         uses: actions/checkout@v3
 
       - name: 🔐 Login to Azure
@@ -89,7 +89,7 @@ jobs:
           username: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientId }}
           password: ${{ fromJson(secrets.AZURE_CREDENTIALS).clientSecret }}
 
-      - name: 📦 Push Docker Image to ACR
+      - name: 📤 Push Docker Image to ACR
         run: |
           docker push $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG
 
@@ -117,7 +117,7 @@ jobs:
             echo "exists=false" >> $GITHUB_ENV
           fi
 
-      - name: 🆕 Create Container App if not exists
+      - name: 🆕 Create Container App if it doesn't exist
         if: env.exists == 'false'
         run: |
           az containerapp env create \
@@ -136,7 +136,7 @@ jobs:
             --registry-username ${{ secrets.ACR_USERNAME }} \
             --registry-password ${{ secrets.ACR_PASSWORD }}
 
-      - name: 🚀 Update Container App if exists
+      - name: 🚀 Update Container App if it exists
         if: env.exists == 'true'
         run: |
           az containerapp update \
@@ -144,7 +144,7 @@ jobs:
             --resource-group $RESOURCE_GROUP \
             --image $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG
 
-      - name: 🌐 Show Deployed URL
+      - name: 🌐 Show Deployed App URL
         run: |
           URL=$(az containerapp show \
             --name $CONTAINERAPP_NAME \
