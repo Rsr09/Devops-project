@@ -1,4 +1,4 @@
-name: CI/CD: Build → Test → Dockerize → Push → Deploy
+name: CI/CD:Build → Test → Dockerize → Push → Deploy
 
 on:
   push:
