@@ -37,8 +37,9 @@ jobs:
         id: set_tag
         run: |
           IMAGE_TAG=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-          echo "📌 Generated Tag: $IMAGE_TAG"
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "FULL_IMAGE=${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:$IMAGE_TAG" >> $GITHUB_ENV
+          echo "::set-output name=image_tag=$IMAGE_TAG"
 
   docker-build:
     needs: build-test
@@ -46,6 +47,12 @@ jobs:
     steps:
       - name: 🧱 Checkout Code
         uses: actions/checkout@v3
+
+      - name: 🏷️ Set Tag Environment
+        run: |
+          echo "IMAGE_TAG=${{ needs.build-test.outputs.image_tag }}" >> $GITHUB_ENV
+          echo "ACR_SERVER=${{ secrets.ACR_LOGIN_SERVER }}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=rajveerapp" >> $GITHUB_ENV
 
       - name: 🔐 Login to Azure
         uses: azure/login@v1
@@ -61,12 +68,18 @@ jobs:
 
       - name: 🐳 Build Docker Image
         run: |
-          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/rajveerapp:${{ needs.build-test.outputs.image_tag }} .
+          docker build -t $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG .
 
   push-acr:
-    needs: docker-build
+    needs: [build-test, docker-build]
     runs-on: ubuntu-latest
     steps:
+      - name: 🏷️ Set Tag Environment
+        run: |
+          echo "IMAGE_TAG=${{ needs.build-test.outputs.image_tag }}" >> $GITHUB_ENV
+          echo "ACR_SERVER=${{ secrets.ACR_LOGIN_SERVER }}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=rajveerapp" >> $GITHUB_ENV
+
       - name: 🔐 Login to Azure
         uses: azure/login@v1
         with:
@@ -81,12 +94,22 @@ jobs:
 
       - name: 📤 Push Docker Image to ACR
         run: |
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/rajveerapp:${{ needs.build-test.outputs.image_tag }}
+          echo "📌 IMAGE TAG: $IMAGE_TAG"
+          echo "📌 FULL IMAGE: $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG"
+          docker push $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG
 
   deploy:
     needs: push-acr
     runs-on: ubuntu-latest
     steps:
+      - name: 🏷️ Set Tag Environment
+        run: |
+          echo "IMAGE_TAG=${{ needs.build-test.outputs.image_tag }}" >> $GITHUB_ENV
+          echo "ACR_SERVER=${{ secrets.ACR_LOGIN_SERVER }}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=rajveerapp" >> $GITHUB_ENV
+          echo "RESOURCE_GROUP=rajveer" >> $GITHUB_ENV
+          echo "CONTAINERAPP_NAME=rajveer" >> $GITHUB_ENV
+
       - name: 🔐 Login to Azure
         uses: azure/login@v1
         with:
@@ -95,7 +118,7 @@ jobs:
       - name: 🔎 Check if Container App Exists
         id: checkapp
         run: |
-          if az containerapp show --name ${{ env.CONTAINERAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} > /dev/null 2>&1; then
+          if az containerapp show --name $CONTAINERAPP_NAME --resource-group $RESOURCE_GROUP > /dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_ENV
           else
             echo "exists=false" >> $GITHUB_ENV
@@ -106,17 +129,17 @@ jobs:
         run: |
           az containerapp env create \
             --name rajveer-env \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --resource-group $RESOURCE_GROUP \
             --location centralindia
 
           az containerapp create \
-            --name ${{ env.CONTAINERAPP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name $CONTAINERAPP_NAME \
+            --resource-group $RESOURCE_GROUP \
             --environment rajveer-env \
-            --image ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.build-test.outputs.image_tag }} \
+            --image $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG \
             --target-port 80 \
             --ingress external \
-            --registry-server ${{ secrets.ACR_LOGIN_SERVER }} \
+            --registry-server $ACR_SERVER \
             --registry-username ${{ secrets.ACR_USERNAME }} \
             --registry-password ${{ secrets.ACR_PASSWORD }}
 
@@ -124,15 +147,15 @@ jobs:
         if: env.exists == 'true'
         run: |
           az containerapp update \
-            --name ${{ env.CONTAINERAPP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ secrets.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ needs.build-test.outputs.image_tag }}
+            --name $CONTAINERAPP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --image $ACR_SERVER/$IMAGE_NAME:$IMAGE_TAG
 
       - name: 🌐 Show Deployed App URL
         run: |
           URL=$(az containerapp show \
-            --name ${{ env.CONTAINERAPP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name $CONTAINERAPP_NAME \
+            --resource-group $RESOURCE_GROUP \
             --query properties.configuration.ingress.fqdn \
             -o tsv)
           echo "🌍 App deployed at: https://$URL"
